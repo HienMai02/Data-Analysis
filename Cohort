@@ -1,0 +1,74 @@
+LINK
+DATASET TRANSACTIONS:
+https://drive.google.com/file/d/1D8iWvUmrLYgFbSj51z5VUgbLneQlUfr1/view?usp=sharing
+
+--PYTHON
+import pandas as pd
+df = pd.read_csv('transactions.csv')
+df['order_date'] = pd.to_datetime(df['order_date'])
+
+#Bước 1:
+#tìm ngày mua hàng đầu tiên của từng user_id
+df_min_order_date = df.groupby('User_id')['order_date'].min().reset_index()
+df_min_order_date = df_min_order_date.rename(columns = {'order_date':'order_date_min'})
+
+#Bước 2:
+#lấy 2 cột, user_id và order_date của bảng transactions và distinct
+df_distinct_user_id_order_date = df[['User_id','order_date']].drop_duplicates()
+
+#Buoc 3:
+#inner join 2 bảng trên theo user_id, và tạo 1 cột date_diff: tính khoảng cách từ ngày order_date và ngày order_date_min
+df_final = pd.merge(df_min_order_date, df_distinct_user_id_order_date, how = 'inner', left_on = 'User_id', right_on = 'User_id')
+df_final['date_diff'] = (df_final['order_date'] - df_final['order_date_min']).dt.days
+
+#Bước 4: group by theo order_date_min
+df_final.groupby('order_date_min').agg(
+    new_user_count = ('User_id', 'nunique'),
+    date_1 = ('User_id', lambda x: (x[df_final['date_diff'] == 1].count())), #lambda: cho mỗi giá trị
+    date_2 = ('User_id', lambda x: (x[df_final['date_diff'] == 2].count())),
+    date_3 = ('User_id', lambda x: (x[df_final['date_diff'] == 3].count()))
+    ).reset_index().sort_values('order_date_min', ascending = False)
+
+--USING SQL:
+Bước 1:
+tìm ngày mua hàng đầu tiên của từng user_id
+select user_id, min(order_date) order_date_min from transactions
+group by user_id
+
+Bước 2:
+lấy 2 cột, user_id và order_date của bảng transactions (distinct)
+select distinct user_id, order_date from transactions
+
+Bước 3: CTE- common table express
+inner join 2 bảng trên theo user_id, và tạo 1 cột date_diff: tính khoảng cách từ ngày order_date và ngày order_date_min
+with min_order_date_table as
+(select user_id, min(order_date) order_date_min from transactions
+group by user_id),
+distinct_user_id_order_date as
+(select distinct user_id, order_date from transactions)
+select *, datediff(order_date, order_date_min) as date_diff
+from distinct_user_id_order_date a inner join min_order_date_table b
+on a.user_id = b.user_id
+
+BƯỚC 4 - FINAL
+with min_order_date_table as
+(select user_id, min(order_date) order_date_min from transactions
+group by user_id),
+distinct_user_id_order_date as
+(select distinct user_id, order_date from transactions) ,
+final_table as (
+select a.user_id, a.order_date, b.order_date_min, datediff(order_date, order_date_min) as date_diff
+from distinct_user_id_order_date a inner join min_order_date_table b
+on a.user_id = b.user_id
+)
+select order_date_min, count(distinct user_id) as new_user_count,
+count(case when date_diff = 1 then user_id end) date_1,
+count(case when date_diff = 2 then user_id end) date_2,
+count(case when date_diff = 3 then user_id end) date_3,
+count(case when date_diff = 4 then user_id end) date_4,
+count(case when date_diff = 5 then user_id end) date_5
+from final_table
+group by order_date_min
+order by order_date_min desc
+
+
